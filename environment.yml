@@ -1,0 +1,16 @@
+name: geco
+channels:
+  - pytorch
+  - defaults
+dependencies:
+  - python=3.10
+  - pytorch
+  - numpy
+  - pandas
+  - scikit-learn
+  - matplotlib
+  - seaborn
+  - statsmodels
+  - networkx
+  - pyyaml
+  - pip

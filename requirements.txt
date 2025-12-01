@@ -1,0 +1,27 @@
+# ==== Core ====
+numpy>=1.23
+pandas>=1.5
+scikit-learn>=1.2
+tqdm>=4.64
+
+# ==== PyTorch (CPU version as fallback) ====
+# NOTE: If GPU is used, install the correct CUDA wheel manually:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+torch>=2.0
+torchvision>=0.15
+
+# ==== Visualization ====
+matplotlib>=3.6
+seaborn>=0.12
+
+# ==== Time series utilities ====
+statsmodels>=0.13
+
+# ==== Graph / Attention utils ====
+networkx>=3.0
+
+# ==== Optional helpers ====
+pyyaml>=6.0
+
+# ==== Prevent future-breaking versions ====
+typing_extensions>=4.7
