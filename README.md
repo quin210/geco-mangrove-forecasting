@@ -1,14 +1,19 @@
-# GECO: Graph-Ecological Coastal Forecaster for Mangrove Canopy Dynamics
+# GECO-EWS: A Physics-Informed Graph Early-Warning Framework for Global Mangrove Canopy Dieback under Climate Stress
 
 [![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-%23EE4C2C.svg?logo=PyTorch&logoColor=white)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-> A hybrid **spatio-temporal** deep-learning framework that couples an
-> **ecological graph neural network** with a **TFT-style temporal forecaster**,
-> under **physics-informed** constraints and explicit **geographic conditioning**,
-> for multi-horizon probabilistic forecasting of mangrove canopy (NDVI) dynamics —
-> built on a **fully reproducible, Google-Earth-Engine-free** data pipeline.
+> **GECO-EWS** is a hybrid **spatio-temporal** deep-learning framework toward a
+> **global early-warning system** for mangrove canopy decline and dieback under
+> climate stress. It couples an **ecological / climatic graph neural network**
+> with a **TFT-style temporal forecaster**, under **physics-informed** constraints
+> and explicit **geographic conditioning** across biogeographic regions and both
+> hemispheres, to produce multi-horizon **probabilistic** NDVI forecasts — all on
+> a **fully reproducible, Google-Earth-Engine-free** data pipeline.
+
+*Naming.* **GECO-EWS** is the framework (Graph-Ecological Coastal Forecaster →
+Early-Warning System); `GECO` / `GECOFullV2` remain the core model classes.
 
 ---
 
@@ -31,21 +36,26 @@
 
 ## Abstract
 
-Mangroves are critical blue-carbon sinks and coastal defences, yet forecasting
-their canopy condition is hard because it couples **spatial ecological
-connectivity** with **temporal environmental drivers** across very different
-climate regimes. **GECO** models both: a multi-seasonal Graph Attention encoder
-produces a spatial embedding per site, which conditions a Temporal Fusion
-Transformer–style module that emits **multi-horizon, multi-quantile** NDVI
-forecasts. Learning is regularised by **eco-physically-informed** constraints and
-made comparable across biogeographic provinces through explicit **geographic
-conditioning**.
+Mangroves are critical blue-carbon sinks and coastal defences, and they are
+increasingly exposed to climate stress — marine heatwaves, drought, and abrupt
+sea-level fluctuations have already driven **mass dieback** events (e.g. the Gulf
+of Carpentaria, 2015–16). Anticipating canopy decline is hard because it couples
+**spatial ecological connectivity** with **temporal environmental drivers** that
+differ sharply across climate regimes and hemispheres. **GECO-EWS** targets this
+as an **early-warning** problem: a multi-seasonal Graph Attention encoder produces
+a spatial embedding per site, which conditions a Temporal Fusion Transformer–style
+module emitting **multi-horizon, multi-quantile** NDVI forecasts, so that
+elevated risk can be flagged with calibrated uncertainty. Learning is regularised
+by **eco-physically-informed** constraints and made comparable across
+biogeographic provinces through explicit **geographic conditioning**.
 
 This repository accompanies ongoing work and emphasises **methodological
 honesty**: every satellite/reanalysis input is obtainable without Google Earth
 Engine, splits are strictly temporal, and skill is reported with a **within-site
 R²** that separates genuine temporal forecasting from trivial between-site level
-differences.
+differences. We present GECO-EWS as a **framework and reproducible benchmark
+toward** operational early warning, not a finished operational system — current
+within-site skill is modest, and closing that gap is the explicit research goal.
 
 ---
 
@@ -204,8 +214,10 @@ noted; the point is the *methodology*, not a leaderboard):
 **Honest takeaway.** Fixing the architecture and adding geographic conditioning
 lets a single model span NDVI regimes from ≈ 0.15 (arid) to ≈ 0.70 (humid)
 without collapsing — geography works. But **within-site temporal skill is still
-near zero**, which defines the open research problem this project targets, rather
-than hiding it behind an inflated pooled R².
+near zero**, and for a credible *early-warning* system it is precisely this
+within-site, ahead-of-time skill (especially around anomalous decline) that must
+improve. We therefore report it openly: it defines the open research problem
+GECO-EWS targets, rather than hiding it behind an inflated pooled R².
 
 ---
 
@@ -266,12 +278,16 @@ geco-mangrove-forecasting/
 
 ## Roadmap
 
-- [ ] Complete the 40-site multi-region dataset (GMW-free snapping) and report
-      within-site R² across regions.
+Toward an operational early-warning framework:
+
+- [ ] Complete the 40-site global multi-region dataset (GMW-free snapping) and
+      report **within-site R²** across regions.
+- [ ] Lift within-site / anomaly skill — the core requirement for early warning.
+- [ ] Thermal-stress physics term using MODIS LST (marine-heatwave signal).
 - [ ] Ocean-current propagule-dispersal graph edges.
-- [ ] Thermal-stress physics term using MODIS LST.
 - [ ] Transfer learning from data-rich to data-poor regions.
-- [ ] Dieback early-warning case study (Gulf of Carpentaria, 2015–16).
+- [ ] **Dieback early-warning case study** — hindcast the Gulf of Carpentaria
+      2015–16 event; evaluate lead time and false-alarm rate, not just R².
 
 ---
 
