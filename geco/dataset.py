@@ -115,4 +115,5 @@ class MangroveWindowDataset(Dataset):
             "y": torch.from_numpy(y_seq),           # [H]
             "x_last": torch.from_numpy(x_last),     # [D]
             "site_idx": torch.tensor(site_idx, dtype=torch.long),
+            "t0": torch.tensor(int(times[start + L]), dtype=torch.long),  # first target time_idx
         }

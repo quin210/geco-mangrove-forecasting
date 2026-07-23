@@ -217,3 +217,13 @@ data/processed/mangrove_multisource.csv
 # throwaway orchestration helpers
 run_multiregion.sh
 monitor_40site.sh
+data/processed/modis_full.csv
+data/processed/climate_full.csv
+data/processed/modis_2526.csv
+data/processed/climate_2526.csv
+data/processed/future_preds.csv
+data/mangrove_sites_valid32.csv
+run_n24.sh
+run_scaling*.sh
+run_ablation.sh
+monitor_future.sh

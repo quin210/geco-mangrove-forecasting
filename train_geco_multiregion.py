@@ -84,6 +84,8 @@ def main():
                     help="comma-separated temporal features to ablate (e.g. thermal group)")
     ap.add_argument("--no_static_geo", action="store_true",
                     help="ablate geographic static node features (aridity, lat, ...)")
+    ap.add_argument("--dump_preds", default=None,
+                    help="CSV path to save best-epoch validation predictions (for forecast plots)")
     ap.add_argument("--device", default=None)
     args = ap.parse_args()
 
@@ -170,7 +172,7 @@ def main():
     lo = (0.0 - tgt_mean) / tgt_std; hi = (1.0 - tgt_mean) / tgt_std
     # per-site TRAIN-mean NDVI (original scale) for the fair within-site metric
     site_mean_ndvi = train_rows.groupby("site_id")["ndvi"].mean().to_dict()
-    best = float("inf"); best_rep = None
+    best = float("inf"); best_rep = None; best_preds = None
 
     for ep in range(1, args.epochs + 1):
         model.train()
@@ -183,7 +185,7 @@ def main():
                 loss = loss + 1.0 * quantile_crossing_loss(yq) + 1.0 * bounds_loss(yq, lo, hi)
             loss.backward(); opt.step()
 
-        model.eval(); Y, P, SI = [], [], []
+        model.eval(); Y, P, SI, TT, HH = [], [], [], [], []
         with torch.no_grad():
             for b in val_loader:
                 x = b["x"].to(device); y = b["y"].to(device); si = b["site_idx"].to(device)
@@ -191,6 +193,9 @@ def main():
                 Y.append(y.cpu().numpy().reshape(-1))
                 P.append(yq.cpu().numpy().reshape(-1, yq.shape[-1]))
                 SI.append(np.repeat(b["site_idx"].numpy(), H))   # align site to each horizon step
+                t0 = b["t0"].numpy()
+                TT.append((t0[:, None] + np.arange(H)[None, :]).reshape(-1))  # target time_idx
+                HH.append(np.tile(np.arange(1, H + 1), len(t0)))              # horizon
         if not Y:
             print("[WARN] no val windows"); break
         yv = np.concatenate(Y) * tgt_std + tgt_mean
@@ -218,11 +223,23 @@ def main():
                 if m.sum() >= 3 and np.var(yv[m]) > 1e-8:
                     per_site[sites[s]] = round(float(r2_score(yv[m], pv[m])), 3)
             best_rep["_per_site_r2"] = per_site
+            if args.dump_preds:
+                tt = np.concatenate(TT); hh = np.concatenate(HH)
+                best_preds = pd.DataFrame({
+                    "site_id": [sites[s] for s in si_all], "time_idx": tt, "horizon": hh,
+                    "y_true": yv, "q10": pq[:, 0], "q50": pq[:, med], "q90": pq[:, -1]})
 
     ps = best_rep.pop("_per_site_r2", {})
     print("[BEST] " + " ".join(f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}"
                                for k, v in best_rep.items()))
     print("[PER-SITE R2] " + " ".join(f"{k}={v}" for k, v in ps.items()))
+
+    if args.dump_preds and best_preds is not None:
+        # attach calendar date via (site_id, time_idx) lookup
+        dmap = df[["site_id", "time_idx", "date"]].drop_duplicates()
+        out = best_preds.merge(dmap, on=["site_id", "time_idx"], how="left")
+        out.to_csv(args.dump_preds, index=False)
+        print(f"[INFO] saved predictions -> {args.dump_preds} ({len(out)} rows)")
 
 
 if __name__ == "__main__":
