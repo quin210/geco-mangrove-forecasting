@@ -229,3 +229,5 @@ run_ablation.sh
 monitor_future.sh
 figures/raster/*.npz
 figures/raster/_*.png
+run_geo2.sh
+run_final_viz.sh
