@@ -227,3 +227,5 @@ run_n24.sh
 run_scaling*.sh
 run_ablation.sh
 monitor_future.sh
+figures/raster/*.npz
+figures/raster/_*.png
