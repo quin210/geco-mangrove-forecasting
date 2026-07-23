@@ -1,0 +1,21 @@
+N=4 seed=0 [BEST] epoch=38 R2=0.9065 within_R2=-0.2739 MAE=0.0568 RMSE=0.0839 quantile_crossing_rate=0.0000 out_of_bounds_rate=0.0000 coverage_80=0.6014
+N=4 seed=1 [BEST] epoch=22 R2=0.9412 within_R2=0.0058 MAE=0.0491 RMSE=0.0724 quantile_crossing_rate=0.0000 out_of_bounds_rate=0.0000 coverage_80=0.7867
+N=4 seed=2 [BEST] epoch=25 R2=0.9791 within_R2=0.5149 MAE=0.0305 RMSE=0.0416 quantile_crossing_rate=0.0000 out_of_bounds_rate=0.0000 coverage_80=0.7057
+N=8 seed=0 [BEST] epoch=37 R2=0.9576 within_R2=0.3557 MAE=0.0362 RMSE=0.0527 quantile_crossing_rate=0.0054 out_of_bounds_rate=0.0000 coverage_80=0.7061
+N=8 seed=1 [BEST] epoch=8 R2=0.8662 within_R2=0.2380 MAE=0.0531 RMSE=0.0705 quantile_crossing_rate=0.0000 out_of_bounds_rate=0.0000 coverage_80=0.7977
+N=8 seed=2 [BEST] epoch=53 R2=0.9297 within_R2=0.2053 MAE=0.0495 RMSE=0.0647 quantile_crossing_rate=0.0215 out_of_bounds_rate=0.0000 coverage_80=0.7384
+N=16 seed=0 [BEST] epoch=50 R2=0.8927 within_R2=0.2558 MAE=0.0481 RMSE=0.0763 quantile_crossing_rate=0.0226 out_of_bounds_rate=0.0000 coverage_80=0.7072
+N=16 seed=1 [BEST] epoch=53 R2=0.9138 within_R2=0.2028 MAE=0.0473 RMSE=0.0771 quantile_crossing_rate=0.0000 out_of_bounds_rate=0.0000 coverage_80=0.8176
+N=16 seed=2 [BEST] epoch=24 R2=0.9058 within_R2=0.2699 MAE=0.0478 RMSE=0.0727 quantile_crossing_rate=0.0000 out_of_bounds_rate=0.0000 coverage_80=0.7591
+N=32 seed=0 [BEST] epoch=11 R2=0.9049 within_R2=0.1731 MAE=0.0495 RMSE=0.0774 quantile_crossing_rate=0.0000 out_of_bounds_rate=0.0000 coverage_80=0.8324
+N=32 seed=1 [BEST] epoch=38 R2=0.9089 within_R2=0.2076 MAE=0.0479 RMSE=0.0758 quantile_crossing_rate=0.0000 out_of_bounds_rate=0.0000 coverage_80=0.7914
+N=32 seed=2 [BEST] epoch=51 R2=0.9059 within_R2=0.1819 MAE=0.0485 RMSE=0.0770 quantile_crossing_rate=0.0127 out_of_bounds_rate=0.0000 coverage_80=0.7364
+=== SCALING SUMMARY ===
+ N_sites         within_R2         pooled_R2
+       4     0.082+/-0.327      0.942+/-0.030
+       8     0.266+/-0.065      0.918+/-0.038
+      16     0.243+/-0.029      0.904+/-0.009
+      32     0.188+/-0.015      0.907+/-0.002
+N=24 seed=0 [BEST] epoch=33 R2=0.8884 within_R2=0.2001 MAE=0.0489 RMSE=0.0765 quantile_crossing_rate=0.0078 out_of_bounds_rate=0.0000 coverage_80=0.7203
+N=24 seed=1 [BEST] epoch=40 R2=0.9007 within_R2=0.1835 MAE=0.0544 RMSE=0.0797 quantile_crossing_rate=0.0000 out_of_bounds_rate=0.0000 coverage_80=0.7361
+N=24 seed=2 [BEST] epoch=34 R2=0.9079 within_R2=0.2387 MAE=0.0455 RMSE=0.0729 quantile_crossing_rate=0.0220 out_of_bounds_rate=0.0000 coverage_80=0.7540
