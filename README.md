@@ -4,470 +4,275 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-%23EE4C2C.svg?logo=PyTorch&logoColor=white)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-> **Official implementation** of GECO: A hybrid spatio-temporal deep learning framework that combines **ecological graph neural networks** with **transformer-based temporal forecasting** for multi-horizon mangrove canopy dynamics prediction.
+> A hybrid **spatio-temporal** deep-learning framework that couples an
+> **ecological graph neural network** with a **TFT-style temporal forecaster**,
+> under **physics-informed** constraints and explicit **geographic conditioning**,
+> for multi-horizon probabilistic forecasting of mangrove canopy (NDVI) dynamics —
+> built on a **fully reproducible, Google-Earth-Engine-free** data pipeline.
 
 ---
 
 ## Table of Contents
 
 - [Abstract](#abstract)
-- [Key Features](#key-features)
+- [What is in this repository](#what-is-in-this-repository)
 - [Architecture](#architecture)
+- [Data pipeline (GEE-free)](#data-pipeline-gee-free)
+- [Geographic conditioning for multi-region modelling](#geographic-conditioning-for-multi-region-modelling)
+- [Physics-informed constraints](#physics-informed-constraints)
+- [Evaluation methodology](#evaluation-methodology)
+- [Results so far](#results-so-far)
 - [Installation](#installation)
-- [Dataset](#dataset)
 - [Usage](#usage)
-- [Model Components](#model-components)
-- [Training Objectives](#training-objectives)
-- [Repository Structure](#repository-structure)
+- [Repository structure](#repository-structure)
+- [Roadmap](#roadmap)
 
 ---
 
 ## Abstract
 
-Mangrove ecosystems are critical blue carbon sinks and coastal defense systems, yet accurately forecasting their health dynamics remains challenging due to complex interactions between spatial connectivity and temporal environmental drivers. We present **GECO** (Graph-Ecological Coastal Forecaster), a novel spatio-temporal deep learning framework that explicitly models ecological connectivity through multi-seasonal graph neural networks combined with temporal feature transformers (TFT).
+Mangroves are critical blue-carbon sinks and coastal defences, yet forecasting
+their canopy condition is hard because it couples **spatial ecological
+connectivity** with **temporal environmental drivers** across very different
+climate regimes. **GECO** models both: a multi-seasonal Graph Attention encoder
+produces a spatial embedding per site, which conditions a Temporal Fusion
+Transformer–style module that emits **multi-horizon, multi-quantile** NDVI
+forecasts. Learning is regularised by **eco-physically-informed** constraints and
+made comparable across biogeographic provinces through explicit **geographic
+conditioning**.
 
-**Key innovations:**
-- **Ecological graph construction** combining geodesic distance, environmental similarity, and seasonal anomaly patterns
-- **Multi-seasonal GAT encoder** with node-conditioned attention for spatial embedding
-- **TFT-inspired temporal module** with static and temporal variable selection networks
-- **Physics-informed constraints** via eco-constrained loss functions
-- **Probabilistic forecasting** with multi-quantile predictions
-
-**Application domain:** Red Sea mangrove sites with 5+ years of multi-variate satellite and reanalysis data (NDVI, SST, salinity, precipitation, ocean currents, wind patterns, soil moisture).
+This repository accompanies ongoing work and emphasises **methodological
+honesty**: every satellite/reanalysis input is obtainable without Google Earth
+Engine, splits are strictly temporal, and skill is reported with a **within-site
+R²** that separates genuine temporal forecasting from trivial between-site level
+differences.
 
 ---
 
-## Key Features
+## What is in this repository
 
-- **Hybrid Spatio-Temporal Architecture**
-  - Multi-seasonal Graph Attention Networks (GAT) for ecological connectivity
-  - Temporal Feature Transformer (TFT) with variable selection
-  
-- **Probabilistic Forecasting**
-  - Multi-quantile predictions (τ ∈ {0.1, 0.5, 0.9})
-  - Uncertainty quantification for decision support
-
-- **Physics-Informed Learning**
-  - Laplacian smoothness regularization
-  - Eco-constrained loss (e.g., salinity-NDVI relationships)
-
-- **Production-Ready**
-  - Clean, modular PyTorch implementation
-  - Comprehensive data preprocessing pipeline
-  - Checkpoint-based training with validation
+| Component | File | Purpose |
+|---|---|---|
+| Fixed temporal architecture | `geco/model_geco_v2.py` | `GECOFullV2` with a per-feature TFT variable-selection network |
+| Physics-informed losses | `geco/physics_losses.py` | quantile non-crossing, canopy-inertia rate limit, physical bounds, water stress + consistency metrics |
+| Geographic conditioning | `geco/geo_features.py` | hemisphere-aware seasonality, static geo descriptors, climatic-similarity graph |
+| Baseline architecture | `geco/model_geco_full.py` | original seasonal-GAT + TFT (kept for ablation) |
+| Data / windows / losses | `geco/dataset.py`, `geco/graph_builder.py`, `geco/losses.py` | sliding windows, graph construction, quantile/Laplacian/eco losses |
+| Single-region training | `train_geco_v2.py`, `train_geco_epi.py` | corrected pipeline + physics ablation |
+| Multi-region training | `train_geco_multiregion.py` | geo-conditioned model + pooled / within-site / per-site R² |
+| GEE-free data fetchers | `data/fetch_modis_ndvi.py`, `data/fetch_openmeteo.py` | MODIS (ORNL) + ERA5 (Open-Meteo) |
+| Data provenance | `data/DATA_SOURCES.md`, `data/merge_sources.py` | sources, licences, merge |
+| Optional GEE path | `gee/` | Earth Engine extraction if preferred |
 
 ---
 
 ## Architecture
 
-GECO integrates two tightly coupled components:
+### 1. Ecological graph encoder
+Static site descriptors and dynamic driver statistics initialise node features
+`h_i^{(0)}`. A base **ecological / climatic** adjacency plus per-season
+adjacencies feed a **multi-season GAT** with node-conditioned attention fusion,
+yielding a spatial embedding `z_i ∈ ℝ^{d_z}`.
 
-### 1. **Ecological Graph Encoder**
-
-```
-Input: Static features (s_i) + Dynamic statistics (μ_i)
-       ↓
-Multi-Seasonal Graph Construction
-  • Base ecological adjacency: A_base = f(d_geo, d_env)
-  • Seasonal adjacencies: A_τ = f(seasonal anomalies), τ ∈ {DJF, MAM, JJA, SON}
-       ↓
-Multi-Season GAT Layers
-  • Parallel GAT processing per season
-  • Node-conditioned attention fusion
-  • Laplacian smoothness regularization
-       ↓
-Output: Spatial embedding z_i ∈ ℝ^d_z per site
-```
-
-### 2. **Temporal Forecasting Module (TFT-style)**
+### 2. Temporal module (TFT-style, corrected)
+The original variable-selection network collapsed all `D` drivers to a **single
+scalar per timestep** before the GRU, discarding most multivariate information.
+`geco/model_geco_v2.py` replaces it with a **per-feature variable selection**
+that projects each driver into an embedding space and combines the selection
+weights *in that space* (output `[B, L, hidden]`), followed by GRU +
+multi-head self-attention and a multi-quantile head.
 
 ```
-Input: Time series x_{i,t-L:t} ∈ ℝ^{L×D}, Spatial embedding z_i
-       ↓
-Static Variable Selection Network (VSN)
-  • Context vector c_stat from z_i
-       ↓
-Temporal Variable Selection Network
-  • Feature-wise selection conditioned on c_stat
-  • GRN-based attention over dynamic features
-       ↓
-GRU + Multi-Head Self-Attention
-  • Sequence encoding with temporal dependencies
-       ↓
-Multi-Quantile Projection
-  • Output: ŷ_{i,t+1:t+H}^{(τ)} ∈ ℝ^{H×Q}
+x_{i,t-L:t}, z_i
+   │
+   ├── Static VSN(z_i) ─────────────► context c_stat
+   │
+   └── Per-feature Temporal VSN(x, c_stat) ─► ξ_t ∈ ℝ^{hidden}
+                                          │
+                            GRU → Multi-Head Attention → GRN
+                                          │
+                       multi-horizon, multi-quantile  ŷ^{(τ)}_{i,t+1:t+H}
 ```
 
-**Training Objective:**
+**Training objective**
 
 $$
-\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{QL}}(\mathbf{y}, \hat{\mathbf{y}}) + \lambda_{\text{lap}} \mathcal{L}_{\text{lap}}(\mathbf{Z}, \mathbf{A}) + \lambda_{\text{eco}} \mathcal{L}_{\text{eco}}(\hat{\mathbf{y}}, \mathbf{x})
+\mathcal{L} = \mathcal{L}_{\text{QL}} + \lambda_{\text{lap}}\,\mathcal{L}_{\text{lap}}
+            + \sum_c \lambda_c\, \mathcal{L}^{\text{phys}}_c
 $$
 
-Where:
-- **$\mathcal{L}_{\text{QL}}$**: Quantile loss for probabilistic forecasting
-- **$\mathcal{L}_{\text{lap}}$**: Laplacian smoothness on graph embeddings
-- **$\mathcal{L}_{\text{eco}}$**: Eco-constrained loss (salinity-NDVI relationship)
+quantile (pinball) loss + graph-Laplacian smoothness + physics-informed terms.
+
+---
+
+## Data pipeline (GEE-free)
+
+Every driver is retrievable over plain HTTP; **most need no account**. See
+`data/DATA_SOURCES.md` for the full table.
+
+| Variable(s) | Product | Source | Auth |
+|---|---|---|---|
+| NDVI, EVI (250 m, 16-day, 2000–present) | MOD13Q1 | ORNL DAAC MODIS Web Service | none |
+| LST day/night (1 km, 8-day) | MOD11A2 | ORNL DAAC MODIS Web Service | none |
+| Air temp, VPD, ET₀, soil moisture, radiation, precipitation | ERA5 | Open-Meteo Archive API | none |
+
+Point APIs sample coordinates rather than rasterising polygons, so a **GMW-free
+"snap"** (`--km 1 --snap`) samples a ~2 km window and keeps the pixels whose
+long-term, QA-masked mean NDVI is mangrove-plausible (∈ [0.15, 0.9]) — dropping
+water/cloud pixels around an imperfectly placed coordinate. Fetchers are
+**resumable** and survive ORNL's intermittent outages.
+
+A curated multi-region site list is provided in
+`data/mangrove_sites_global.csv` (40 sites across 9 biogeographic regions,
+including the 2015–16 Gulf of Carpentaria dieback zone).
+
+---
+
+## Geographic conditioning for multi-region modelling
+
+Pooling sites from different climate zones and **both hemispheres** makes a raw
+month or a raw driver value ambiguous. `geco/geo_features.py` supplies the
+context the model needs:
+
+- **Hemisphere-aware seasonality** — Southern-hemisphere phase is shifted by six
+  months so a phase peak means the same physiological season everywhere.
+- **Static geographic descriptors** — signed latitude, `|latitude|`
+  (seasonality amplitude), longitude sin/cos, and an **aridity index**
+  (precip / ET₀) that cleanly orders regimes (Persian Gulf ≈ 0.02 → SE Asia ≈ 1.9).
+- **Climatic-similarity block graph** — within-region geodesic neighbours plus
+  cross-region **climatic-niche** neighbours, because geodesic distance is
+  meaningless across oceans.
+
+---
+
+## Physics-informed constraints
+
+`geco/physics_losses.py` implements differentiable soft penalties, applied only
+where they are consistent with mangrove eco-physiology **and** the data:
+
+- **Quantile non-crossing** — enforce q₀.₁ ≤ q₀.₅ ≤ q₀.₉.
+- **Canopy-inertia rate limit** — bound month-to-month NDVI change (calibrated to
+  the empirical 99th percentile).
+- **Physical bounds** — keep NDVI in a physical interval.
+- **Multi-driver water stress** — under sustained low water availability, penalise
+  forecast NDVI increases.
+
+> The original salinity constraint is intentionally **not** used: in the Red Sea
+> data salinity varies little (37–40 PSU), *Avicennia marina* is salt-tolerant,
+> and the salinity–NDVI relationship is not data-supported there.
+
+---
+
+## Evaluation methodology
+
+Splits are **strictly temporal** (past → train, future → validation) per site;
+no random window shuffling. Skill is reported at three levels:
+
+- **Pooled R²** — over all sites/horizons. Across regions this is dominated by
+  *between-site level differences* and can look deceptively high.
+- **Within-site R²** — each site's train-mean is removed first, isolating genuine
+  temporal forecasting skill (the metric that matters).
+- **Per-site R²** — a per-site breakdown.
+
+Probabilistic quality is tracked with 80% **coverage**, quantile-crossing rate,
+and out-of-bounds rate.
+
+---
+
+## Results so far
+
+Representative validation numbers from the corrected pipeline (single seed unless
+noted; the point is the *methodology*, not a leaderboard):
+
+**Single region (5 Red Sea sites)**
+
+| Model | val R² | note |
+|---|---|---|
+| Seasonal-naive baseline | 0.19 | value 12 months prior |
+| GECO (original scalar-VSN architecture) | ≈ 0.0 | loses to seasonal-naive |
+| **GECO v2** (per-feature VSN + seasonality) | **≈ 0.64** | clears every naive baseline |
+| GECO v2 + physics | ≈ 0.64 | ~equal accuracy, **better calibration** (coverage 0.76 → 0.80) |
+
+**Multi-region (demo subset, geo-conditioned)**
+
+| Metric | value | reading |
+|---|---|---|
+| Pooled R² | ≈ 0.88 | mostly between-site separation |
+| Predict-site-mean baseline | ≈ 0.86 | shows how much pooled R² is "free" |
+| **Within-site R²** | ≈ 0.1 | **genuine temporal skill is still low** |
+
+**Honest takeaway.** Fixing the architecture and adding geographic conditioning
+lets a single model span NDVI regimes from ≈ 0.15 (arid) to ≈ 0.70 (humid)
+without collapsing — geography works. But **within-site temporal skill is still
+near zero**, which defines the open research problem this project targets, rather
+than hiding it behind an inflated pooled R².
 
 ---
 
 ## Installation
 
-### Prerequisites
-
-- Python 3.10+
-- CUDA 11.8+ (for GPU acceleration, optional)
-- Git
-
-### Option 1: Conda Environment (Recommended)
-
 ```bash
-# Clone the repository
 git clone https://github.com/quin210/geco-mangrove-forecasting.git
 cd geco-mangrove-forecasting
-
-# Create conda environment
-conda env create -f environment.yml
-conda activate geco
-
-# Install PyTorch with CUDA support (if available)
-# For CUDA 12.1:
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+conda env create -f environment.yml && conda activate geco   # or: pip install -r requirements.txt
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121  # GPU optional
 ```
-
-### Option 2: pip Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/quin210/geco-mangrove-forecasting.git
-cd geco-mangrove-forecasting
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Install PyTorch with CUDA support (if available)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-```
-
-### Verify Installation
-
-```bash
-python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
-```
-
----
-
-## Dataset
-
-### Data Structure
-
-The preprocessed dataset (`data/processed/mangrove_all.csv`) contains multi-year observations from 5 Red Sea mangrove sites:
-
-**Sites:** Al Shabaan, Al Shoaiba, Al Wajh, Duba Lake, Juzur Janabiat
-
-**Features (per timestep):**
-- **Target:** `ndvi` (Normalized Difference Vegetation Index)
-- **Spatial:** `latitude`, `longitude`, `area`
-- **Environmental drivers:**
-  - `precipitation`, `salinity`, `sea_surface_height`
-  - `soil_moisture`, `ocean_current_speed`
-  - `ocean_cur_dir_sin`, `ocean_cur_dir_cos`
-  - `wind_speed`, `wind_direction_sin`, `wind_direction_cos`
-
-**Temporal coverage:** January 2014 – Present (~140+ monthly observations per site)
-
-### Data Format
-
-```csv
-site_id,date,time_idx,latitude,longitude,area,ndvi,precipitation,salinity,...
-Al_Shabaan,1/1/2014,1,24.80,37.18,490467,0.333,0,39.49,...
-```
-
-### Raw Data
-
-Raw per-site CSV files are available in `data/raw/`:
-- `Al_Shabaan.csv`
-- `Al_Shoaiba.csv`
-- `Al_Wajh.csv`
-- `Duba_Lake.csv`
-- `Juzur_Janabiat.csv`
-
----
 
 ## Usage
 
-### Quick Start: Training
-
 ```bash
-python train_geco.py \
-  --csv_path data/processed/mangrove_all.csv \
-  --input_length 12 \
-  --forecast_horizon 3 \
-  --batch_size 64 \
-  --epochs 50 \
-  --lr 1e-3 \
-  --checkpoint checkpoints/geco_full_tft.pt
-```
+# 1) Fetch data (no Google Earth Engine, no account needed)
+python data/fetch_modis_ndvi.py --sites_csv data/mangrove_sites_global.csv \
+    --km 1 --snap --wait_ornl --out data/processed/modis_global.csv
+python data/fetch_openmeteo.py --sites_csv data/mangrove_sites_global.csv \
+    --start 2014-01 --end 2024-12 --out data/processed/climate_global.csv
 
-### Training Options
+# 2a) Single-region training + physics ablation
+python train_geco_epi.py --arch v2 --add_season_feats --physics --epochs 120
 
-#### Data & Model Configuration:
-```bash
---csv_path              # Path to processed CSV
---input_length 12       # Lookback window (months)
---forecast_horizon 3    # Forecast horizon (months)
---batch_size 64         # Training batch size
---epochs 50             # Number of training epochs
---lr 1e-3               # Learning rate
---device cuda           # Device: cuda, cpu, or auto-detect
-```
-
-#### Graph Hyperparameters:
-```bash
---num_seasons 4               # Number of seasonal graphs (4 = DJF/MAM/JJA/SON)
---lambda_geo 1.0              # Weight for geodesic distance
---lambda_env 1.0              # Weight for environmental similarity
---sigma_geo 1.0               # Gaussian kernel width (geodesic)
---sigma_env 1.0               # Gaussian kernel width (environment)
---sigma_dyn 1.0               # Gaussian kernel width (seasonal dynamics)
---k_neighbors_base 5          # k-NN for base ecological graph
---k_neighbors_seasonal 5      # k-NN for seasonal graphs
-```
-
-#### Model Architecture:
-```bash
---gnn_hidden_dim 64           # GAT hidden dimension
---gnn_out_dim 64              # Spatial embedding dimension
---temporal_hidden_dim 128     # TFT hidden dimension
---num_heads 4                 # Multi-head attention heads
-```
-
-#### Regularization:
-```bash
---lambda_lap 1e-3             # Laplacian smoothness weight
---lambda_eco 1e-3             # Eco-constraint weight
-```
-
-### Example: Extended Training
-
-```bash
-python train_geco.py \
-  --csv_path data/processed/mangrove_all.csv \
-  --input_length 18 \
-  --forecast_horizon 6 \
-  --batch_size 32 \
-  --epochs 100 \
-  --lr 5e-4 \
-  --num_seasons 4 \
-  --gnn_hidden_dim 128 \
-  --gnn_out_dim 128 \
-  --temporal_hidden_dim 256 \
-  --num_heads 8 \
-  --lambda_lap 5e-4 \
-  --lambda_eco 1e-3 \
-  --checkpoint checkpoints/geco_extended.pt
-```
-
-### Model Inference
-
-```python
-import torch
-import pandas as pd
-from geco.model_geco_full import GECOFull
-
-# Load checkpoint
-ckpt = torch.load("checkpoints/geco_full_tft.pt")
-model = GECOFull(
-    static_init=ckpt['static_init'],
-    base_adj_norm=ckpt['base_adj_norm'],
-    seasonal_adjs=ckpt['seasonal_adjs'],
-    **ckpt['config']
-)
-model.load_state_dict(ckpt['model_state_dict'])
-model.eval()
-
-# Prepare input data
-# x_seq: [batch_size, input_length, num_features]
-# site_idx: [batch_size] - integer site indices
-
-# Inference
-with torch.no_grad():
-    predictions, spatial_embeddings = model(x_seq, site_idx)
-    # predictions: [B, forecast_horizon, num_quantiles]
-    # spatial_embeddings: [num_sites, gnn_out_dim]
-    
-    # Extract median forecast (quantile 0.5)
-    median_forecast = predictions[:, :, 1]  # [B, H]
+# 2b) Multi-region training with geographic conditioning
+python train_geco_multiregion.py --modis data/processed/modis_global.csv \
+    --climate data/processed/climate_global.csv --physics --epochs 80
 ```
 
 ---
 
-## Model Components
-
-### 1. Dataset Module (`geco/dataset.py`)
-
-**`MangroveWindowDataset`**: Sliding-window time series dataset
-- Constructs input sequences: $x_{i,t-L:t}$
-- Extracts target horizons: $y_{i,t+1:t+H}$
-- Automatic feature detection and normalization
-- Site-aware batching
-
-### 2. Graph Builder (`geco/graph_builder.py`)
-
-**Core Functions:**
-- `build_static_and_dynamic_stats()`: Construct node initialization vectors
-- `build_base_ecological_adjacency()`: Base graph with geo + env similarity
-- `build_seasonal_adjacencies()`: Multi-seasonal graphs from anomaly patterns
-
-**Graph Construction:**
-
-Base ecological adjacency:
-```python
-A_base = λ_geo · K_geo(d_geo, σ_geo) + λ_env · K_env(d_env, σ_env)
-```
-
-Seasonal graphs:
-```python
-A_τ = K_dyn(seasonal_anomalies, σ_dyn)
-```
-
-Where $K(\cdot)$ is Gaussian RBF kernel with k-NN sparsification.
-
-### 3. Model Architecture (`geco/model_geco_full.py`)
-
-**Components:**
-- `GATLayer`: Single-head Graph Attention layer with LeakyReLU activation
-- `SeasonalGATEncoder`: Multi-seasonal GAT with fusion attention
-  - Parallel GAT processing per season
-  - Node-conditioned attention fusion via learnable query vector
-  - Output: spatial embeddings $\mathbf{z}_i \in \mathbb{R}^{d_z}$
-  
-- `StaticVSN`: Static Variable Selection Network
-  - GRN-based processing of spatial embeddings
-  - Produces context vector for temporal module
-  
-- `TemporalVSN`: Temporal Variable Selection Network
-  - Feature-wise selection at each timestep
-  - Conditioned on static context
-  
-- `TemporalBackboneTFT`: GRU + Multi-head Attention + Quantile projection
-  - Sequence encoding with GRU
-  - Self-attention for long-range dependencies
-  - Multi-quantile output layer
-  
-- `GECOFull`: Complete end-to-end model
-  - Integrates spatial encoder + temporal module
-  - Forward pass returns predictions + spatial embeddings
-
-### 4. Loss Functions (`geco/losses.py`)
-
-- **`quantile_loss()`**: Standard quantile regression loss
-  ```python
-  ρ_τ(u) = max(τ·u, (τ-1)·u)
-  ```
-  
-- **`laplacian_smoothness_loss()`**: Graph regularization
-  ```python
-  L_lap = Σ_i || z_i - Σ_j A_ij z_j ||²
-  ```
-  
-- **`eco_salinity_loss()`**: Physics-informed constraint
-  - Penalizes NDVI increase under extreme salinity stress
-  ```python
-  φ_sal = max(0, α·(s - s_thr)·(ŷ - y_prev))
-  ```
-
-### 5. Training Utils (`geco/utils.py`)
-
-- `train_epoch()`: Training loop with composite loss
-  - Forward pass through model
-  - Compute quantile loss + regularization terms
-  - Backpropagation and optimization
-  
-- `eval_epoch()`: Validation with R², MAE, RMSE metrics
-  - Uses median quantile (τ=0.5) for point predictions
-  - Computes standard regression metrics
-
----
-
-## Training Objectives
-
-The total loss combines three components:
-
-### 1. Quantile Loss ($\mathcal{L}_{\text{QL}}$)
-
-Enables probabilistic forecasting with uncertainty quantification:
-
-$$
-\mathcal{L}_{\text{QL}} = \frac{1}{BHQ} \sum_{b=1}^B \sum_{h=1}^H \sum_{q=1}^Q \rho_{\tau_q}(y_{b,h} - \hat{y}_{b,h,q})
-$$
-
-Where: $\rho_{\tau}(u) = \max(\tau u, (\tau-1)u)$ is the pinball loss.
-
-**Default quantiles:** τ ∈ {0.1, 0.5, 0.9} (10th, 50th, 90th percentiles)
-
-### 2. Laplacian Smoothness Loss ($\mathcal{L}_{\text{lap}}$)
-
-Enforces spatial consistency over the ecological graph:
-
-$$
-\mathcal{L}_{\text{lap}} = \sum_{i=1}^N \left\| \mathbf{z}_i - \sum_{j=1}^N A_{ij} \mathbf{z}_j \right\|^2
-$$
-
-**Purpose:** Encourages neighboring sites (in the ecological graph) to have similar embeddings.
-
-### 3. Eco-Constrained Loss ($\mathcal{L}_{\text{eco}}$)
-
-Penalizes biophysically implausible forecasts:
-
-$$
-\mathcal{L}_{\text{eco}} = \frac{1}{B} \sum_{b=1}^B \max\left(0, \alpha_{\text{sal}} (s_b - s_{\text{thr}}) (\hat{y}_b - y_{b,\text{prev}})\right)
-$$
-
-**Constraint:** Prevents NDVI increase when salinity exceeds threshold (default: 35 PSU).
-
-**Total Objective:**
-
-$$
-\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{QL}} + \lambda_{\text{lap}} \mathcal{L}_{\text{lap}} + \lambda_{\text{eco}} \mathcal{L}_{\text{eco}}
-$$
-
-**Default weights:** $\lambda_{\text{lap}} = 10^{-3}$, $\lambda_{\text{eco}} = 10^{-3}$
-
-
-## Repository Structure
+## Repository structure
 
 ```
 geco-mangrove-forecasting/
-├── README.md                    # This file
-├── LICENSE                      # Apache-2.0 License
-├── requirements.txt             # Python dependencies (pip)
-├── environment.yml              # Conda environment specification
-├── train_geco.py               # Main training script
-│
-├── data/                        # Dataset directory
-│   ├── raw/                     # Raw per-site CSV files
-│   │   ├── Al_Shabaan.csv
-│   │   ├── Al_Shoaiba.csv
-│   │   ├── Al_Wajh.csv
-│   │   ├── Duba_Lake.csv
-│   │   └── Juzur_Janabiat.csv
-│   │
-│   └── processed/               # Preprocessed combined dataset
-│       └── mangrove_all.csv
-│
-├── geco/                        # Core model package
-│   ├── __init__.py
-│   ├── dataset.py              # MangroveWindowDataset class
-│   ├── graph_builder.py        # Graph construction utilities
-│   ├── model_geco_full.py      # GECOFull model architecture
-│   ├── losses.py               # Loss functions (QL, Laplacian, Eco)
-│   └── utils.py                # Training/evaluation utilities
-│
-└── checkpoints/                 # Model checkpoints (created during training)
-    └── .gitkeep
+├── geco/
+│   ├── dataset.py               # sliding-window dataset (+ standardization)
+│   ├── graph_builder.py         # ecological / seasonal graph construction
+│   ├── model_geco_full.py       # original GECO (baseline / ablation)
+│   ├── model_geco_v2.py         # GECOFullV2: per-feature TFT VSN
+│   ├── geo_features.py          # geographic conditioning + climatic graph
+│   ├── losses.py                # quantile / Laplacian / eco losses
+│   └── physics_losses.py        # physics-informed constraints + metrics
+├── train_geco_v2.py             # corrected single-region pipeline
+├── train_geco_epi.py            # + physics ablation
+├── train_geco_multiregion.py    # multi-region, geo-conditioned
+├── data/
+│   ├── fetch_modis_ndvi.py      # MODIS via ORNL (GEE-free)
+│   ├── fetch_openmeteo.py       # ERA5 via Open-Meteo (GEE-free)
+│   ├── merge_sources.py         # combine sources
+│   ├── DATA_SOURCES.md          # provenance & licences
+│   ├── mangrove_sites_global.csv# 40 multi-region sites
+│   └── processed/mangrove_all.csv
+└── gee/                         # optional Earth Engine extraction path
 ```
+
+---
+
+## Roadmap
+
+- [ ] Complete the 40-site multi-region dataset (GMW-free snapping) and report
+      within-site R² across regions.
+- [ ] Ocean-current propagule-dispersal graph edges.
+- [ ] Thermal-stress physics term using MODIS LST.
+- [ ] Transfer learning from data-rich to data-poor regions.
+- [ ] Dieback early-warning case study (Gulf of Carpentaria, 2015–16).
+
+---
+
+*This repository documents research in progress; results and interfaces may change.*
