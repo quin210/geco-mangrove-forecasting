@@ -1,8 +1,31 @@
-# Google Earth Engine extraction for GECO
+# Google Earth Engine extraction for GECO-EWS
 
 Extracts a monthly, per-site environmental time series for mangrove sites,
-adding the currently-missing thermal driver **LST** (land surface temperature),
-in the same schema as `data/processed/mangrove_all.csv`.
+adding the thermal driver **LST** (land surface temperature), in the same schema
+as `data/processed/mangrove_all.csv`.
+
+---
+
+## 0. Do you actually need GEE?  (read this first)
+
+**The default pipeline does NOT need GEE.** `data/fetch_modis_ndvi.py` (ORNL) and
+`data/fetch_openmeteo.py` (ERA5) already pull NDVI/EVI/LST + climate for any site
+list, no account required. Use this `gee/` path **only** when you want something
+the point APIs can't do well:
+
+| Reach for GEE when you need… | Why the free path struggles |
+|---|---|
+| **Polygon-averaged** NDVI over the true GMW mangrove extent | ORNL only samples a point/grid window; our `--snap` is an approximation |
+| **Auto-generating many sites** from GMW polygons in a bbox | point APIs need you to supply coordinates |
+| **Strict cloud/QA masking at scale** (humid tropics) | doable point-wise but slow/rate-limited over 100s of sites |
+| **LST / SST / tidal for hundreds of sites, fast** | ORNL is slow (~5 s/request) and rate-limits |
+
+> **Workflow if you decide to use GEE:** you (with a GEE account) run the script
+> below, download the export, and **drop the CSV in `gee/outputs/`** (see
+> [§4](#4-where-gee-outputs-go--how-to-plug-in)). Everything downstream then works
+> exactly like the GEE-free path. If GEE is **not** needed, ignore this folder.
+
+---
 
 ## 1. One-time setup
 
@@ -62,18 +85,40 @@ Editor *Tasks* tab; the CSV lands in `Google Drive/GECO_mangrove/mangrove_gee.cs
 > Marine, a separate download). The GECO code auto-detects available columns, so
 > a CSV without them still trains.
 
-## 4. After download — merge to the project schema
+## 4. Where GEE outputs go & how to plug in
+
+**Landing spot:** put the raw Drive export in **`gee/outputs/`** (that folder
+exists and is tracked; see `gee/outputs/README.md` for the expected schema). This
+is the folder to push GEE results to.
+
+**Then convert to the training schema:**
 
 ```bash
 python gee/postprocess_gee_csv.py \
-    --in ~/Downloads/mangrove_gee.csv \
+    --in  gee/outputs/mangrove_gee.csv \
     --out data/processed/mangrove_gee_all.csv
 ```
 
 This sorts by site/time, rebuilds a contiguous `time_idx`, drops months with
-missing NDVI, and reports coverage per site. Then train exactly as before,
-pointing `--csv_path` at the new file — `lst_day`/`lst_night` become available
-for a **thermal-stress physics constraint**.
+missing NDVI, and reports coverage per site.
+
+**Then train** — the GEE output is a drop-in replacement for the GEE-free CSVs:
+
+```bash
+# single-region / single combined CSV
+python train_geco_epi.py --csv_path data/processed/mangrove_gee_all.csv --arch v2 --add_season_feats --physics
+
+# multi-region: use the GEE NDVI as --modis and climate as --climate
+python train_geco_multiregion.py --modis data/processed/mangrove_gee_all.csv \
+    --climate data/processed/climate_global.csv --physics
+```
+
+**Column contract** (what the trainers expect). At minimum: `site_id`, `date`
+(`M/D/YYYY`), `latitude`, `longitude`, `ndvi` **or** `ndvi_modis` (target).
+Optional drivers are auto-detected: `lst_day`, `lst_night` (unlock a
+thermal-stress physics term), `precipitation`/`precip_era5`, `soil_moisture`,
+`sst`, `wind_*`. Any missing column is simply skipped — a GEE CSV without ocean
+currents still trains.
 
 ## 5. Notes / gotchas
 
