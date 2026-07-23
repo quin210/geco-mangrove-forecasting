@@ -13,7 +13,7 @@ C_WITHIN, C_POOLED = "#0072B2", "#D55E00"
 INK, MUTED, GRID = "#222222", "#666666", "#DDDDDD"
 
 
-def load(path="results/scaling.txt"):
+def load(path="results/scaling_fixed.txt"):
     d = {}
     for r in open(path):
         if not r.startswith("N="):

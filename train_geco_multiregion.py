@@ -47,8 +47,11 @@ def build_dataframe(modis_path, climate_path):
     df = modis.merge(clim[keep_clim], on=["site_id", "date"], how="inner")
     df = df.rename(columns={"ndvi_modis": "ndvi"}).dropna(subset=["ndvi"])
     df = add_geo_features(df)                       # season_sin/cos + static geo + aridity
-    df = df.sort_values(["site_id", "date"]).reset_index(drop=True)
+    # sort CHRONOLOGICALLY (parse date; string sort of 'M/D/YYYY' is NOT chronological)
+    df["_dt"] = pd.to_datetime(df["date"], format="%m/%d/%Y", errors="coerce")
+    df = df.sort_values(["site_id", "_dt"]).reset_index(drop=True)
     df["time_idx"] = df.groupby("site_id").cumcount() + 1
+    df = df.drop(columns=["_dt"])
     return df, [c for c in drivers if c in df.columns]
 
 
@@ -72,6 +75,15 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--num_seasons", type=int, default=4)
     ap.add_argument("--physics", action="store_true")
+    ap.add_argument("--n_sites", type=int, default=0,
+                    help="if >0, randomly subsample this many sites (breadth-scaling study)")
+    ap.add_argument("--cutoff_date", default=None,
+                    help="YYYY-MM: train on <= this month, validate strictly AFTER "
+                         "(held-out future forecast test, e.g. 2024-12)")
+    ap.add_argument("--drop_feats", default="",
+                    help="comma-separated temporal features to ablate (e.g. thermal group)")
+    ap.add_argument("--no_static_geo", action="store_true",
+                    help="ablate geographic static node features (aridity, lat, ...)")
     ap.add_argument("--device", default=None)
     args = ap.parse_args()
 
@@ -80,6 +92,11 @@ def main():
         "cuda" if torch.cuda.is_available() else "cpu")
 
     df, driver_cols = build_dataframe(args.modis, args.climate)
+    if args.n_sites and args.n_sites < df["site_id"].nunique():
+        rng = np.random.default_rng(args.seed)
+        keep = rng.choice(sorted(df["site_id"].unique()), args.n_sites, replace=False)
+        df = df[df["site_id"].isin(keep)].reset_index(drop=True)
+        print(f"[INFO] breadth study: subsampled to {args.n_sites} sites")
     sites = sorted(df["site_id"].unique())
     site_id_to_idx = {s: i for i, s in enumerate(sites)}
     N = len(sites)
@@ -89,8 +106,12 @@ def main():
     # temporal feature columns = drivers + hemisphere-aware season + target
     feat_cols = driver_cols + SEASONAL_TEMPORAL_COLS
     # exclude everything non-temporal from the dataset's dynamic features
-    static_present = [c for c in STATIC_GEO_COLS if c in df.columns]
-    exclude = ["time_idx", "latitude", "longitude"] + static_present + ["evi_modis", "n_comp", "month"]
+    geo_cols = [c for c in STATIC_GEO_COLS if c in df.columns]
+    drop = [f.strip() for f in args.drop_feats.split(",") if f.strip()]
+    static_present = [] if args.no_static_geo else geo_cols
+    exclude = ["time_idx", "latitude", "longitude"] + geo_cols + ["evi_modis", "n_comp", "month"] + drop
+    if drop or args.no_static_geo:
+        print(f"[INFO] ablation: drop_feats={drop} no_static_geo={args.no_static_geo}")
 
     # ---- static node features: standardized [geo descriptors | driver means] ----
     S = df.groupby("site_id")[static_present].first().reindex(sites).to_numpy(np.float32)
@@ -108,8 +129,19 @@ def main():
 
     # ---- windows + time-based split ----
     L, H = args.input_length, args.forecast_horizon
-    cutoff = {s: np.sort(g["time_idx"].to_numpy())[int(round((1 - args.val_frac) * len(g))) - 1]
-              for s, g in df.groupby("site_id")}
+    if args.cutoff_date:
+        cut = pd.Period(args.cutoff_date, "M")
+        ym = pd.to_datetime(df["date"], format="%m/%d/%Y").dt.to_period("M")
+        df = df.assign(_ym=ym)
+        cutoff = {}
+        for s, g in df.groupby("site_id"):
+            gg = g[g["_ym"] <= cut]
+            cutoff[s] = int(gg["time_idx"].max()) if len(gg) else -1
+        df = df.drop(columns=["_ym"])
+        print(f"[INFO] held-out-future split: train <= {args.cutoff_date}, validate after")
+    else:
+        cutoff = {s: np.sort(g["time_idx"].to_numpy())[int(round((1 - args.val_frac) * len(g))) - 1]
+                  for s, g in df.groupby("site_id")}
     probe = MangroveWindowDataset(df, L, H, site_id_to_idx, target_col="ndvi", exclude_cols=exclude)
     dyn_cols = probe.dynamic_cols
     train_rows = df[df.apply(lambda r: r["time_idx"] <= cutoff[r["site_id"]], axis=1)]
