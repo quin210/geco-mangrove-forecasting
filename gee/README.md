@@ -70,20 +70,56 @@ python gee/extract_mangrove_gee.py --project YOUR_GEE_PROJECT \
 The script starts an **Export.table.toDrive** task. Watch it in the EE Code
 Editor *Tasks* tab; the CSV lands in `Google Drive/GECO_mangrove/mangrove_gee.csv`.
 
-## 3. Variables produced
+## 3. Variable catalogue — exactly what to pull from GEE
 
-| Column | Source | Notes |
+All variables are reduced to a **monthly value per site** (polygon/buffer mean,
+`reduceRegions`), `date = M/1/YYYY`. Priority ranks value for the **dieback
+early-warning** goal (★★★ = pull first).
+
+### 3A. Core — already in `extract_mangrove_gee.py`
+
+| Column | GEE asset | Band(s) | Scale / unit | Monthly agg | Priority — why |
+|---|---|---|---|---|---|
+| `ndvi` | `MODIS/061/MOD13Q1` | `NDVI` | ×1e-4 (ratio) | mean | ★★★ target (canopy greenness) |
+| `lst_day`, `lst_night` | `MODIS/061/MOD11A2` | `LST_Day_1km`, `LST_Night_1km` | ×0.02 K − 273.15 → °C | mean | ★★★ thermal stress / heatwave |
+| `precipitation` | `UCSB-CHG/CHIRPS/DAILY` | `precipitation` | mm | **sum** | ★★ water supply |
+| `soil_moisture` | `ECMWF/ERA5_LAND/MONTHLY_AGGR` | `volumetric_soil_water_layer_1` | m³/m³ | mean | ★★ drought |
+| `sst` | `NOAA/CDR/OISST/V2_1` | `sst` | ×0.01 → °C | mean | ★★★ marine heatwave (free path can't get this at coast) |
+| `wind_speed`, `wind_direction_sin/cos` | `ECMWF/ERA5_LAND/MONTHLY_AGGR` | `u_/v_component_of_wind_10m` | m/s; dir=atan2(v,u) | mean | ★ storm exposure |
+
+### 3B. Recommended additions — extend the script to unlock the early-warning story
+
+| Column | GEE asset | Band(s) | Scale / unit | Agg | Priority — why |
+|---|---|---|---|---|---|
+| `evi` | `MODIS/061/MOD13Q1` | `EVI` | ×1e-4 | mean | ★★ less saturating than NDVI in dense canopy |
+| `mangrove_extent`, `area_m2` | GMW (e.g. `projects/sat-io/open-datasets/GMW/extent/GMW_v3`) | yearly extent | mask | area | ★★★ define sites + track **loss/dieback area** directly |
+| `inundation` | `JRC/GSW1_4/MonthlyHistory` | `water` | fraction inundated | mean | ★★★ hydroperiod; the Carpentaria dieback tracked sea-level/inundation |
+| `chlor_a` | `NASA/OCEANDATA/MODIS-Aqua/L3SMI` | `chlor_a` | mg/m³ | mean | ★ coastal productivity / turbidity |
+| `canopy_height` | `NASA/GEDI/...` L4A or Potapov 2021 canopy height | height | m | mean/first | ★★ structure / blue-carbon; baseline biomass |
+| `nightlights` | `NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG` | `avg_rad` | nW·cm⁻²·sr⁻¹ | mean | ★ human pressure (aquaculture/urban) |
+| `air_temp`, `vpd` | `ECMWF/ERA5_LAND/MONTHLY_AGGR` | `temperature_2m`, `dewpoint_2m` | °C; VPD from T,Td | mean | ★★ (also available via Open-Meteo non-GEE) |
+
+> **QA matters:** for MOD13Q1 mask by `SummaryQA ≤ 1`; for MOD11A2 mask by
+> `QC_Day`/`QC_Night` good-quality bits — before the monthly mean. This is a key
+> reason to prefer GEE over point sampling in cloudy tropics.
+
+### 3C. Not on GEE — pull elsewhere (non-GEE)
+
+| Column | Source | How |
 |---|---|---|
-| `ndvi` | MODIS/061/MOD13Q1 | 16-day 250 m, scaled ×1e-4 |
-| `lst_day`, `lst_night` | MODIS/061/MOD11A2 | °C (×0.02 − 273.15) — **new thermal driver** |
-| `precipitation` | UCSB-CHG/CHIRPS/DAILY | monthly sum (mm) |
-| `soil_moisture` | ECMWF/ERA5_LAND/MONTHLY_AGGR | volumetric soil water L1 |
-| `sst` | NOAA/CDR/OISST/V2_1 | °C |
-| `wind_speed`, `wind_direction_sin/cos` | ERA5-Land 10 m u/v | speed = hypot(u,v) |
+| `air_temp_mean/max/min`, `vpd`, `et0`, `soil_moist_era5`, `radiation`, `precip_era5`, `water_balance` | ERA5 via **Open-Meteo** | `data/fetch_openmeteo.py` (no account) |
+| `salinity`, `sea_surface_height`, `ocean_current_speed`, `ocean_cur_dir_*` | **Copernicus Marine (CMEMS)** | free account + `copernicusmarine` client (already in `mangrove_all.csv`) |
 
-> **Not on GEE:** `ocean_current_speed`, `ocean_cur_dir_*` (from Copernicus
-> Marine, a separate download). The GECO code auto-detects available columns, so
-> a CSV without them still trains.
+## 3.5 GEE vs non-GEE — division of labour
+
+- **Pull from GEE** the things point-APIs can't do well: **GMW-polygon-averaged**
+  NDVI/EVI with **strict cloud masking**, **SST at the coast**, **inundation**
+  (JRC water), **canopy structure** (GEDI), **mangrove-loss area** (GMW change),
+  and auto-generated sites from GMW.
+- **Pull non-GEE** (already automated, no account): ERA5 climate/water-stress via
+  Open-Meteo, and MODIS NDVI/EVI/LST via ORNL as a fallback.
+- **Merge** on `(site_id, date)` — the trainers auto-detect whatever columns are
+  present, so GEE and non-GEE variables combine into one richer dataset.
 
 ## 4. Where GEE outputs go & how to plug in
 

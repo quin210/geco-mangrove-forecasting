@@ -120,9 +120,9 @@ def monthly_image(start):
     """Build a single multi-band monthly-composite image for date `start`."""
     end = start.advance(1, "month")
 
-    ndvi = (ee.ImageCollection("MODIS/061/MOD13Q1")
-            .filterDate(start, end).select("NDVI").mean()
-            .multiply(0.0001).rename("ndvi"))
+    mod13 = ee.ImageCollection("MODIS/061/MOD13Q1").filterDate(start, end)
+    ndvi = mod13.select("NDVI").mean().multiply(0.0001).rename("ndvi")
+    evi = mod13.select("EVI").mean().multiply(0.0001).rename("evi")
 
     lst = ee.ImageCollection("MODIS/061/MOD11A2").filterDate(start, end)
     lst_day = lst.select("LST_Day_1km").mean().multiply(0.02).subtract(273.15).rename("lst_day")
@@ -145,7 +145,7 @@ def monthly_image(start):
            .filterDate(start, end).select("sst").mean()
            .multiply(0.01).rename("sst"))
 
-    return (ndvi.addBands([lst_day, lst_night, precip, soil,
+    return (ndvi.addBands([evi, lst_day, lst_night, precip, soil,
                            sst, wind_speed, wdir_sin, wdir_cos]))
 
 
@@ -182,7 +182,7 @@ def main():
     end = ee.Date(args.end + "-01").advance(1, "month")
     n_months = end.difference(start, "month").round()
 
-    bands = ["ndvi", "lst_day", "lst_night", "precipitation", "soil_moisture",
+    bands = ["ndvi", "evi", "lst_day", "lst_night", "precipitation", "soil_moisture",
              "sst", "wind_speed", "wind_direction_sin", "wind_direction_cos"]
 
     def per_month(m):

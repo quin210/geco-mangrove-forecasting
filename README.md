@@ -136,6 +136,13 @@ A curated multi-region site list is provided in
 `data/mangrove_sites_global.csv` (40 sites across 9 biogeographic regions,
 including the 2015–16 Gulf of Carpentaria dieback zone).
 
+To enrich further with variables the point APIs can't do well — **GMW-polygon
+NDVI/EVI with strict cloud masking, coastal SST, inundation (JRC water), canopy
+structure (GEDI), mangrove-loss area** — an optional Google Earth Engine path is
+provided in `gee/`. See **`gee/README.md` §3** for the exact variable catalogue
+(asset IDs, bands, scaling, aggregation) and drop exports into `gee/outputs/`;
+GEE and non-GEE variables merge on `(site_id, date)`.
+
 ---
 
 ## Geographic conditioning for multi-region modelling
