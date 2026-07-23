@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
-from typing import Dict
+from typing import Dict, List, Optional, Tuple
 
 
 class MangroveWindowDataset(Dataset):
@@ -27,30 +27,59 @@ class MangroveWindowDataset(Dataset):
         forecast_horizon: int,
         site_id_to_idx: Dict,
         target_col: str = "ndvi",
+        exclude_cols: Optional[List[str]] = None,
+        norm_stats: Optional[Dict[str, Tuple[float, float]]] = None,
     ):
         super().__init__()
         self.input_length = input_length
         self.forecast_horizon = forecast_horizon
         self.target_col = target_col
 
+        # Columns that are numeric but should NOT be temporal drivers
+        # (constant per site => no temporal signal, only add noise).
+        if exclude_cols is None:
+            exclude_cols = ["time_idx", "latitude", "longitude"]
+
         # Sort by site/time
         df = df.sort_values(["site_id", "time_idx"]).reset_index(drop=True)
         self.df = df
 
-        # Numeric columns for dynamic features
-        numeric_cols = [c for c in df.columns if np.issubdtype(df[c].dtype, np.number)]
-        if "time_idx" in numeric_cols:
-            numeric_cols.remove("time_idx")
+        # Numeric columns for dynamic features (pandas-native check so it also
+        # handles the modern StringDtype used for object columns like site_id/date).
+        numeric_cols = [
+            c for c in df.columns
+            if pd.api.types.is_numeric_dtype(df[c]) and c not in exclude_cols
+        ]
         if target_col not in numeric_cols:
             raise ValueError(f"Target column '{target_col}' must be numeric and present.")
         self.dynamic_cols = numeric_cols
 
         self.site_id_to_idx = site_id_to_idx
 
+        # Optional per-feature standardization (stats must be fit on TRAIN only).
+        self.norm_stats = norm_stats
+        if norm_stats is not None:
+            self.feat_mean = np.array(
+                [norm_stats[c][0] for c in self.dynamic_cols], dtype=np.float32
+            )
+            self.feat_std = np.array(
+                [norm_stats[c][1] for c in self.dynamic_cols], dtype=np.float32
+            )
+            tgt_i = self.dynamic_cols.index(target_col)
+            self.target_mean = float(self.feat_mean[tgt_i])
+            self.target_std = float(self.feat_std[tgt_i])
+        else:
+            self.feat_mean = None
+            self.feat_std = None
+            self.target_mean = 0.0
+            self.target_std = 1.0
+
         # Build per-site time series: (site_idx, arr_dyn, time_idx)
         self.series = []
         for sid, g in df.groupby("site_id"):
             arr = g[self.dynamic_cols].to_numpy(dtype=np.float32)
+            if self.feat_mean is not None:
+                arr = (arr - self.feat_mean) / self.feat_std
             times = g["time_idx"].to_numpy()
             s_idx = site_id_to_idx[sid]
             self.series.append((s_idx, arr, times))
